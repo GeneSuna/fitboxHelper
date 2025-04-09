@@ -1,0 +1,406 @@
+Live API
+
+To try a tutorial that lets you use your voice and camera to talk to Gemini through the Live API, see the Web Console Demo project.
+
+The Live API enables low-latency bidirectional voice and video interactions with Gemini. Using the Live API, you can provide end users with the experience of natural, human-like voice conversations, and with the ability to interrupt the model's responses using voice commands. The model can process text, audio, and video input, and it can provide text and audio output.
+
+You can try the Live API in Google AI Studio.
+
+Use the Live API
+This section describes how to use the Live API with one of our SDKs. For more information about the underlying WebSockets API, see the WebSockets API reference below.
+
+Send and receive text
+
+import asyncio
+from google import genai
+
+client = genai.Client(api_key="GEMINI_API_KEY", http_options={'api_version': 'v1alpha'})
+model = "gemini-2.0-flash-exp"
+
+config = {"response_modalities": ["TEXT"]}
+
+async def main():
+    async with client.aio.live.connect(model=model, config=config) as session:
+        while True:
+            message = input("User> ")
+            if message.lower() == "exit":
+                break
+            await session.send(input=message, end_of_turn=True)
+
+            async for response in session.receive():
+                if response.text is not None:
+                    print(response.text, end="")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+Receive audio
+The following example shows how to receive audio data and write it to a .wav file.
+
+
+import asyncio
+import wave
+from google import genai
+
+client = genai.Client(api_key="GEMINI_API_KEY", http_options={'api_version': 'v1alpha'})
+model = "gemini-2.0-flash-exp"
+
+config = {"response_modalities": ["AUDIO"]}
+
+async def main():
+    async with client.aio.live.connect(model=model, config=config) as session:
+        wf = wave.open("audio.wav", "wb")
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(24000)
+
+        message = "Hello? Gemini are you there?"
+        await session.send(input=message, end_of_turn=True)
+
+        async for idx,response in async_enumerate(session.receive()):
+            if response.data is not None:
+                wf.writeframes(response.data)
+
+            # Un-comment this code to print audio data info
+            # if response.server_content.model_turn is not None:
+            #      print(response.server_content.model_turn.parts[0].inline_data.mime_type)
+
+        wf.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+Audio formats
+The Live API supports the following audio formats:
+
+Input audio format: Raw 16 bit PCM audio at 16kHz little-endian
+Output audio format: Raw 16 bit PCM audio at 24kHz little-endian
+Stream audio and video
+To see an example of how to use the Live API in a streaming audio and video format, run the "Live API - Quickstart" file in the cookbooks repository:
+
+View on GitHub
+
+System instructions
+System instructions let you steer the behavior of a model based on your specific needs and use cases. System instructions can be set in the setup configuration and will remain in effect for the entire session.
+
+
+from google.genai import types
+
+config = {
+    "system_instruction": types.Content(
+        parts=[
+            types.Part(
+                text="You are a helpful assistant and answer in a friendly tone."
+            )
+        ]
+    ),
+    "response_modalities": ["TEXT"],
+}
+Incremental content updates
+Use incremental updates to send text input, establish session context, or restore session context. For short contexts you can send turn-by-turn interactions to represent the exact sequence of events:
+
+Python
+JSON
+
+from google.genai import types
+
+turns = [
+    types.Content(parts=[types.Part(text="What is the capital of France?")], role="user"),
+    types.Content(parts=[types.Part(text="Paris")], role="model")
+]
+await session.send(input=types.LiveClientContent(turns=turns))
+
+turns = [types.Content(parts=[types.Part(text="What is the capital of Germany?")], role="user")]
+await session.send(input=types.LiveClientContent(turns=turns, turn_complete=True))
+For longer contexts it's recommended to provide a single message summary to free up the context window for subsequent interactions.
+
+Change voices
+The Live API supports the following voices: Aoede, Charon, Fenrir, Kore, and Puck.
+
+To specify a voice, set the voice name within the speechConfig object as part of the session configuration:
+
+Python
+JSON
+
+from google.genai import types
+
+config = types.LiveConnectConfig(
+    response_modalities=["AUDIO"],
+    speech_config=types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
+        )
+    )
+)
+Use function calling
+You can define tools with the Live API. See the Function calling tutorial to learn more about function calling.
+
+Tools must be defined as part of the session configuration:
+
+
+config = types.LiveConnectConfig(
+    response_modalities=["TEXT"],
+    tools=[set_light_values]
+)
+
+async with client.aio.live.connect(model=model, config=config) as session:
+    await session.send(input="Turn the lights down to a romantic level", end_of_turn=True)
+
+    async for response in session.receive():
+        print(response.tool_call)
+From a single prompt, the model can generate multiple function calls and the code necessary to chain their outputs. This code executes in a sandbox environment, generating subsequent BidiGenerateContentToolCall messages. The execution pauses until the results of each function call are available, which ensures sequential processing.
+
+The client should respond with BidiGenerateContentToolResponse.
+
+Audio inputs and audio outputs negatively impact the model's ability to use function calling.
+
+Handle interruptions
+Users can interrupt the model's output at any time. When Voice activity detection (VAD) detects an interruption, the ongoing generation is canceled and discarded. Only the information already sent to the client is retained in the session history. The server then sends a BidiGenerateContentServerContent message to report the interruption.
+
+In addition, the Gemini server discards any pending function calls and sends a BidiGenerateContentServerContent message with the IDs of the canceled calls.
+
+
+async for response in session.receive():
+    if response.server_content.interrupted is not None:
+        # The generation was interrupted
+Limitations
+Consider the following limitations of the Live API and Gemini 2.0 when you plan your project.
+
+Client authentication
+The Live API only provides server to server authentication and isn't recommended for direct client use. Client input should be routed through an intermediate application server for secure authentication with the Live API.
+
+Conversation history
+While the model keeps track of in-session interactions, conversation history isn't stored. When a session ends, the corresponding context is erased.
+
+In order to restore a previous session or provide the model with historic context of user interactions, the application should maintain its own conversation log and use a BidiGenerateContentClientContent message to send this information at the start of a new session.
+
+Maximum session duration
+Session duration is limited to up to 15 minutes for audio or up to 2 minutes of audio and video. When the session duration exceeds the limit, the connection is terminated.
+
+The model is also limited by the context size. Sending large chunks of content alongside the video and audio streams may result in earlier session termination.
+
+Voice activity detection (VAD)
+The model automatically performs voice activity detection (VAD) on a continuous audio input stream. VAD is always enabled, and its parameters aren't configurable.
+
+Token count
+Token count isn't supported.
+
+Rate limits
+The following rate limits apply:
+
+3 concurrent sessions per API key
+4M tokens per minute
+WebSockets API reference
+The Live API is a stateful API that uses WebSockets. In this section, you'll find additional details regarding the WebSockets API.
+
+Sessions
+A WebSocket connection establishes a session between the client and the Gemini server. After a client initiates a new connection the session can exchange messages with the server to:
+
+Send text, audio, or video to the Gemini server.
+Receive audio, text, or function call requests from the Gemini server.
+The initial message after connection sets the session configuration, which includes the model, generation parameters, system instructions, and tools.
+
+See the following example configuration. Note that the name casing in SDKs may vary. You can look up the Python SDK configuration options here.
+
+
+
+{
+  "model": string,
+  "generationConfig": {
+    "candidateCount": integer,
+    "maxOutputTokens": integer,
+    "temperature": number,
+    "topP": number,
+    "topK": integer,
+    "presencePenalty": number,
+    "frequencyPenalty": number,
+    "responseModalities": [string],
+    "speechConfig": object
+  },
+  "systemInstruction": string,
+  "tools": [object]
+}
+Send messages
+To exchange messages over the WebSocket connection, the client must send a JSON object over an open WebSocket connection. The JSON object must have exactly one of the fields from the following object set:
+
+
+
+{
+  "setup": BidiGenerateContentSetup,
+  "clientContent": BidiGenerateContentClientContent,
+  "realtimeInput": BidiGenerateContentRealtimeInput,
+  "toolResponse": BidiGenerateContentToolResponse
+}
+Supported client messages
+See the supported client messages in the following table:
+
+Message	Description
+BidiGenerateContentSetup	Session configuration to be sent in the first message
+BidiGenerateContentClientContent	Incremental content update of the current conversation delivered from the client
+BidiGenerateContentRealtimeInput	Real time audio or video input
+BidiGenerateContentToolResponse	Response to a ToolCallMessage received from the server
+Receive messages
+To receive messages from Gemini, listen for the WebSocket 'message' event, and then parse the result according to the definition of the supported server messages.
+
+See the following:
+
+
+async with client.aio.live.connect(model='...', config=config) as session:
+    await session.send(input='Hello world!', end_of_turn=True)
+    async for message in session.receive():
+        print(message)
+Server messages will have exactly one of the fields from the following object set:
+
+
+
+{
+  "setupComplete": BidiGenerateContentSetupComplete,
+  "serverContent": BidiGenerateContentServerContent,
+  "toolCall": BidiGenerateContentToolCall,
+  "toolCallCancellation": BidiGenerateContentToolCallCancellation
+}
+Supported server messages
+See the supported server messages in the following table:
+
+Message	Description
+BidiGenerateContentSetupComplete	A BidiGenerateContentSetup message from the client, sent when setup is complete
+BidiGenerateContentServerContent	Content generated by the model in response to a client message
+BidiGenerateContentToolCall	Request for the client to run the function calls and return the responses with the matching IDs
+BidiGenerateContentToolCallCancellation	Sent when a function call is canceled due to the user interrupting model output
+Messages and events
+BidiGenerateContentClientContent
+Incremental update of the current conversation delivered from the client. All of the content here is unconditionally appended to the conversation history and used as part of the prompt to the model to generate content.
+
+A message here will interrupt any current model generation.
+
+Fields
+turns[]	
+Content
+
+Optional. The content appended to the current conversation with the model.
+
+For single-turn queries, this is a single instance. For multi-turn queries, this is a repeated field that contains conversation history and the latest request.
+
+turn_complete	
+bool
+
+Optional. If true, indicates that the server content generation should start with the currently accumulated prompt. Otherwise, the server awaits additional messages before starting generation.
+
+BidiGenerateContentRealtimeInput
+User input that is sent in real time.
+
+This is different from BidiGenerateContentClientContent in a few ways:
+
+Can be sent continuously without interruption to model generation.
+If there is a need to mix data interleaved across the BidiGenerateContentClientContent and the BidiGenerateContentRealtimeInput, the server attempts to optimize for best response, but there are no guarantees.
+End of turn is not explicitly specified, but is rather derived from user activity (for example, end of speech).
+Even before the end of turn, the data is processed incrementally to optimize for a fast start of the response from the model.
+Is always assumed to be the user's input (cannot be used to populate conversation history). Can be sent continuously without interruptions. The model automatically detects the beginning and the end of user speech and starts or terminates streaming the response accordingly. Data is processed incrementally as it arrives, minimizing latency.
+Fields
+media_chunks[]	
+Blob
+
+Optional. Inlined bytes data for media input.
+
+BidiGenerateContentServerContent
+Incremental server update generated by the model in response to client messages.
+
+Content is generated as quickly as possible, and not in real time. Clients may choose to buffer and play it out in real time.
+
+Fields
+turn_complete	
+bool
+
+Output only. If true, indicates that the model is done generating. Generation will only start in response to additional client messages. Can be set alongside content, indicating that the content is the last in the turn.
+
+interrupted	
+bool
+
+Output only. If true, indicates that a client message has interrupted current model generation. If the client is playing out the content in real time, this is a good signal to stop and empty the current playback queue.
+
+grounding_metadata	
+GroundingMetadata
+
+Output only. Grounding metadata for the generated content.
+
+model_turn	
+Content
+
+Output only. The content that the model has generated as part of the current conversation with the user.
+
+BidiGenerateContentSetup
+Message to be sent in the first and only first client message. Contains configuration that will apply for the duration of the streaming session.
+
+Clients should wait for a BidiGenerateContentSetupComplete message before sending any additional messages.
+
+Fields
+model	
+string
+
+Required. The model's resource name. This serves as an ID for the Model to use.
+
+Format: models/{model}
+
+generation_config	
+GenerationConfig
+
+Optional. Generation config.
+
+The following fields are not supported:
+
+responseLogprobs
+responseMimeType
+logprobs
+responseSchema
+stopSequence
+routingConfig
+audioTimestamp
+system_instruction	
+Content
+
+Optional. The user provided system instructions for the model.
+
+Note: Only text should be used in parts. Content in each part will be in a separate paragraph.
+
+tools[]	
+Tool
+
+Optional. A list of Tools the model may use to generate the next response.
+
+A Tool is a piece of code that enables the system to interact with external systems to perform an action, or set of actions, outside of knowledge and scope of the model.
+
+BidiGenerateContentSetupComplete
+This type has no fields.
+
+Sent in response to a BidiGenerateContentSetup message from the client.
+
+BidiGenerateContentToolCall
+Request for the client to execute the function calls and return the responses with the matching ids.
+
+Fields
+function_calls[]	
+FunctionCall
+
+Output only. The function call to be executed.
+
+BidiGenerateContentToolCallCancellation
+Notification for the client that a previously issued ToolCallMessage with the specified ids should not have been executed and should be cancelled. If there were side-effects to those tool calls, clients may attempt to undo the tool calls. This message occurs only in cases where the clients interrupt server turns.
+
+Fields
+ids[]	
+string
+
+Output only. The ids of the tool calls to be cancelled.
+
+BidiGenerateContentToolResponse
+Client generated response to a ToolCall received from the server. Individual FunctionResponse objects are matched to the respective FunctionCall objects by the id field.
+
+Note that in the unary and server-streaming GenerateContent APIs function calling happens by exchanging the Content parts, while in the bidi GenerateContent APIs function calling happens over these dedicated set of messages.
+
+Fields
+function_responses[]	
+FunctionResponse
+
+Optional. The response to the function calls.
+
+
+More information on common types
+For more information on the commonly-used API resource types Blob, Content, FunctionCall, FunctionResponse, GenerationConfig, GroundingMetadata, and Tool, see Generating content.

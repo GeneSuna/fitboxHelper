@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>fitbox Helper</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <h1>fitbox Helper</h1>
+
+        <!-- Initial View (Disconnected) -->
+        <div id="initialView">
+            <p>Click below to connect the AI helper.</p>
+            <button id="connectBtn">Connect Helper</button>
+            <p id="initialErrorText" class="error-text"></p> <!-- For errors shown before connecting -->
+        </div>
+
+        <!-- Connecting View -->
+        <div id="connectingView" class="hidden">
+            <p id="connectingStatus">Connecting to helper service...</p>
+            <div class="spinner"></div>
+            <button id="cancelConnectBtn">Cancel</button>
+        </div>
+
+        <!-- Connected View -->
+        <div id="connectedView" class="hidden">
+            <p><strong>Status:</strong> <span id="connectedStatus">Connected</span></p>
+            <p><em>Listening for voice commands...</em></p>
+             <p><small>Context: <span id="connectionContext">Loading...</span></small></p> 
+             <p style="font-size: 0.8em; color: #555;">Mic: <span id="mic-label">-</span></p>
+            <button id="disconnectBtn">Disconnect Helper</button>
+        </div>
+
+        <!-- Error View -->
+        <div id="errorView" class="hidden">
+            <p class="error-text"><strong>Error</strong></p>
+            <p id="errorText" class="error-text">An unknown error occurred.</p>
+            <button id="tryAgainBtn">Try Again</button>
+            <button id="closePopupBtn">Close</button> <!-- Added close button -->
+        </div>
+
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
