@@ -115,13 +115,22 @@ wss.on('connection', (ws, req) => {
     ws.on('message', async (message, isBinary) => {
         // Handle incoming messages (JSON control messages or binary audio)
         if (isBinary) {
-            // Binary data (audio)
-            console.log(`[WebSocket] Received BINARY message (audio chunk), Size: ${message.length} bytes`);
-            // Pass the raw buffer directly
+            // Binary data (audio) - Transcode before sending
+            console.log(`[WebSocket] Received BINARY message (audio chunk), Size: ${message.length} bytes. Transcoding...`);
             if (ws.geminiSession) {
-                ws.geminiSession.handleClientMessage(message); // <<< PASS RAW BUFFER
+                try {
+                    // Transcode the raw WebM/Opus buffer to Base64 PCM as required by Gemini
+                    const base64Pcm = await transcodeAudioToBase64Pcm(message);
+
+                    // Pass the transcoded Base64 string to the session handler
+                    // Note: The session handler will now need to expect a string
+                    ws.geminiSession.handleClientMessage(base64Pcm);
+                } catch (error) {
+                    console.error('[WebSocket] Audio transcoding failed:', error);
+                    // Optionally, you could send an error message back to the client here
+                }
             } else {
-                console.warn('[WebSocket] Received audio chunk for a non-existent session.');
+                console.warn('[WebSocket] Received audio chunk but the AI session is not active. Ignoring.');
             }
         } else {
             // Text data (should be JSON)

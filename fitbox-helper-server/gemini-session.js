@@ -178,55 +178,27 @@ export class GeminiSession {
 
     // Method to handle messages received FROM the client (via index.js)
     handleClientMessage(message) {
-        let messageType = 'Unknown';
-        if (message instanceof Buffer || message instanceof ArrayBuffer) {
-            messageType = 'Binary';
-            console.log(`[GeminiSession ${this.sessionId}] Received BINARY message (audio) from client, Size: ${message.byteLength} bytes.`);
-        } else if (typeof message === 'object' && message !== null && message.type) {
-             messageType = 'JSON Object';
-             console.log(`[GeminiSession ${this.sessionId}] Received parsed JSON OBJECT from client:`, message);
-        } else {
-            console.warn(`[GeminiSession ${this.sessionId}] Received message of unexpected type from client: ${typeof message}`);
-            return; // Don't proceed with unknown types
-        }
-
-        // Now check connection state before processing
         if (!this.isConnectedToGemini) {
-            console.warn(`[GeminiSession ${this.sessionId}] Received client message (Type: ${messageType}) but not connected to Gemini. Buffering or Ignoring? (Currently Ignoring)`);
-            // Optional: Implement buffering logic here if needed
+            console.warn(`[GeminiSession ${this.sessionId}] Received client message but not connected to Gemini. Ignoring.`);
             return;
         }
 
-        // Process based on type
-        if (messageType === 'JSON Object') {
-            // Handle JSON commands (like 'context' update)
+        // Message can be a JSON object (for commands) or a Base64 string (for audio)
+        if (typeof message === 'object' && message !== null && message.type) {
+            // Handle JSON commands
+            console.log(`[GeminiSession ${this.sessionId}] Received parsed JSON OBJECT from client:`, message);
             if (message.type === 'context') {
-                console.log(`[GeminiSession ${this.sessionId}] Handling 'context' update: ${message.context}. (Note: Gemini Live might not use this directly)`);
+                console.log(`[GeminiSession ${this.sessionId}] Handling 'context' update: ${message.context}. (Note: This is for context only, not sent to Gemini Live)`);
                 this.currentContext = message.context;
             } else {
                 console.warn(`[GeminiSession ${this.sessionId}] Received unknown JSON message type from client: ${message.type}`);
             }
-        } else if (messageType === 'Binary') {
-            // Handle Binary audio data
-            this._sendAudioToGemini(message); // Send the original binary data (Buffer/ArrayBuffer)
-        }
-    }
-
-    _sendAudioToGemini(audioBuffer) {
-        if (!this.isConnectedToGemini || !this.geminiWs || this.geminiWs.readyState !== WebSocket.OPEN) {
-            console.warn(`[GeminiSession ${this.sessionId}] Cannot send audio: Not connected to Gemini.`);
-            return;
-        }
-        try {
-            // Assuming the API expects raw audio binary data within a specific JSON structure
-            const audioMessage = {
-                 audio_content: Buffer.from(audioBuffer).toString('base64') // Send as base64 string in JSON
-            };
-            // console.log(`[GeminiSession ${this.sessionId}] Sending audio chunk to Gemini (${audioMessage.audio_content.length} base64 chars)...`);
-            this.geminiWs.send(JSON.stringify(audioMessage));
-        } catch (error) {
-            console.error(`[GeminiSession ${this.sessionId}] Error sending audio to Gemini:`, error);
-            this._handleGeminiError(error);
+        } else if (typeof message === 'string') {
+            // Handle Base64 encoded audio data string
+            // console.log(`[GeminiSession ${this.sessionId}] Received BASE64 message (audio) from client, Length: ${message.length}`);
+            this.handleAudioInput(message); // Pass the Base64 string directly
+        } else {
+            console.warn(`[GeminiSession ${this.sessionId}] Received message of unexpected type from client: ${typeof message}`);
         }
     }
 
@@ -293,30 +265,29 @@ export class GeminiSession {
     }
 
     /**
-     * Handles incoming raw audio data buffer from the client.
-     * Encodes it to Base64 and sends it to the Gemini API.
-     * @param {Buffer} audioBuffer Raw audio data.
+     * Handles incoming Base64-encoded audio data from the client.
+     * Sends it to the Gemini API using the correct 'realtimeInput' payload structure.
+     * @param {string} base64Audio The Base64 encoded PCM audio data.
      */
-    handleAudioInput(audioBuffer) {
+    handleAudioInput(base64Audio) {
         if (!this.geminiWs || this.geminiWs.readyState !== WebSocket.OPEN) {
             console.warn(`[GeminiSession ${this.sessionId}] Gemini WebSocket not open. Cannot send audio.`);
             return;
         }
 
         try {
-            const base64Audio = audioBuffer.toString('base64');
+            // The audio is already Base64 encoded PCM from index.js
             const audioMessage = {
                 // Use realtimeInput structure based on documentation
-                realtimeInput: {
-                    media_chunks: [ base64Audio ] // Send Base64 string directly in the array again
+                "realtimeInput": {
+                    "media_chunks": [ base64Audio ]
                 }
             };
 
-            console.log(`[GeminiSession ${this.sessionId}] Sending audio chunk (${audioBuffer.length} bytes) to Gemini.`);
+            // console.log(`[GeminiSession ${this.sessionId}] Sending audio chunk (${base64Audio.length} chars) to Gemini.`);
             this.geminiWs.send(JSON.stringify(audioMessage));
         } catch (error) {
             console.error(`[GeminiSession ${this.sessionId}] Error processing/sending audio chunk:`, error);
-            // Optionally send an error back to the client?
         }
     }
 
